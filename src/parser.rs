@@ -1,5 +1,6 @@
 use std::str::Chars;
-use std::iter::Peekable;
+use std::iter::{Peekable, FromIterator};
+use std::option::Option::Some;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum ValueType {
@@ -12,8 +13,10 @@ pub enum ValueType {
     OBJECT,
 }
 
+#[derive(Debug, PartialEq)]
 pub struct Value {
     value_type: ValueType,
+    number: f64,
 }
 
 impl Value {
@@ -48,7 +51,7 @@ impl Parser<'_> {
             Some('n') => self.parse_null(),
             Some('t') => self.parse_true(),
             Some('f') => self.parse_false(),
-            _ => Err(DecodingError::InvalidValue),
+            _ => self.parse_number(),
         };
 
         self.skip_white_space();
@@ -77,6 +80,7 @@ impl Parser<'_> {
         {
             return Ok(Value {
                 value_type: ValueType::NULL,
+                number: 0.0
             });
         }
 
@@ -91,6 +95,7 @@ impl Parser<'_> {
         {
             return Ok(Value {
                 value_type: ValueType::TRUE,
+                number: 0.0
             });
         }
 
@@ -106,10 +111,100 @@ impl Parser<'_> {
         {
             return Ok(Value {
                 value_type: ValueType::FALSE,
+                number: 0.0
             });
         }
 
         return Err(DecodingError::InvalidValue);
+    }
+
+    fn parse_number(&mut self) -> Result<Value, DecodingError> {
+        // number = [ "-" ] int [ fraction ] [ exponent ]
+        // int = "0" / digit1-9 *digit
+        // fraction = "." 1*digit
+        // exp = ("e" / "E") ["-" / "+"] 1*digit
+        let mut number_chars = vec![];
+
+        // 解析 "-"
+        if let Some(ch) = Parser::next_if(&mut self.chars, |ch| ch == '-') {
+            number_chars.push(ch);
+        }
+
+        // 解析整数部分
+        // int = "0" / digit1-9 *digit
+        if let Some(ch) = Parser::next_if(&mut self.chars, |ch| ch == '0') {
+            number_chars.push(ch);
+        } else if let Some(ch) = Parser::next_if(&mut self.chars, |ch| ch >= '1' && ch <= '9') {
+            number_chars.push(ch);
+            while let Some(ch) = Parser::next_if(&mut self.chars, |ch| ch >= '0' && ch <= '9') {
+                number_chars.push(ch);
+            }
+        } else {
+            // 整数部分必须存在
+            return Err(DecodingError::InvalidValue);
+        }
+
+        // 解析小数部分
+        // fraction = "." 1*digit
+        if let Some(ch) = Parser::next_if(&mut self.chars, |ch| ch == '.') {
+            number_chars.push(ch);
+
+            // 小数点后面至少要有一个数字
+            if let Some(ch) = Parser::next_if(&mut self.chars, |ch| ch >= '0' && ch <= '9') {
+                number_chars.push(ch);
+            } else {
+                return Err(DecodingError::InvalidValue);
+            }
+
+            // 解析小数点后的其它数字
+            while let Some(ch) = Parser::next_if(&mut self.chars, |ch| ch >= '0' && ch <= '9') {
+                number_chars.push(ch);
+            }
+        }
+
+        // 解析指数部分
+        // exp = ("e" / "E") ["-" / "+"] 1*digit
+        if let Some(ch) = Parser::next_if(&mut self.chars, |ch| ch == 'e' || ch == 'E') {
+            number_chars.push(ch);
+
+            if let Some(ch) = Parser::next_if(&mut self.chars, |ch| ch == '-' || ch == '+') {
+                number_chars.push(ch);
+            }
+
+            // 必须至少有一个数字
+            if let Some(ch) = Parser::next_if(&mut self.chars, |ch| ch >= '0' && ch <= '9') {
+                number_chars.push(ch);
+            } else {
+                return Err(DecodingError::InvalidValue);
+            }
+
+            // 解析剩余数字
+            while let Some(ch) = Parser::next_if(&mut self.chars, |ch| ch >= '0' && ch <= '9') {
+                number_chars.push(ch);
+            }
+        }
+
+        // 将字符串形式的数字，转换为 double 来存储
+        let number = String::from_iter(number_chars).parse::<f64>();
+        return if number.is_err() {
+            Err(DecodingError::InvalidValue)
+        } else {
+            Ok(Value {
+                value_type: ValueType::NUMBER,
+                number: number.unwrap()
+            })
+        }
+    }
+
+    fn next_if(chars: &mut Peekable<Chars>,  func: impl FnOnce(char) -> bool) -> Option<char> {
+        if let Some(&ch) = chars.peek() {
+            if func(ch) {
+                chars.next();
+                return Some(ch);
+            }
+        }
+
+        return None;
     }
 }
 
@@ -121,6 +216,7 @@ mod tests {
     fn get_value_type() {
         let value = Value {
             value_type: ValueType::NULL,
+            number: 0.0
         };
 
         assert_eq!(value.get_type(), ValueType::NULL);
@@ -180,5 +276,51 @@ mod tests {
         let decoded_value = decoder.parse();
         assert!(decoded_value.is_ok());
         assert_eq!(decoded_value.unwrap().value_type, ValueType::FALSE);
+    }
+
+    fn test_number(ok_value: f64, text: &str) {
+        let mut decoder = Parser::new(text);
+        let actual_result = decoder.parse();
+        assert!(actual_result.is_ok());
+        assert_eq!(actual_result.unwrap().number, ok_value);
+    }
+
+    fn test_error_number(error: DecodingError, text: &str) {
+        let mut decoder = Parser::new(text);
+        let actual_result = decoder.parse();
+        assert!(actual_result.is_err());
+        assert_eq!(actual_result.unwrap_err(), error);
+    }
+
+    #[test]
+    fn parse_number() {
+        test_number(0.0, "0");
+        test_number(0.0, "-0");
+        test_number(0.0, "-0.0");
+        test_number(1.0, "1");
+        test_number(-1.0, "-1");
+        test_number(1.5, "1.5");
+        test_number(-1.5, "-1.5");
+        test_number(3.1416, "3.1416");
+        test_number(1E10, "1E10");
+        test_number(1e10, "1e10");
+        test_number(1E+10, "1E+10");
+        test_number(1E-10, "1E-10");
+        test_number(-1E10, "-1E10");
+        test_number(-1e10, "-1e10");
+        test_number(-1E+10, "-1E+10");
+        test_number(-1E-10, "-1E-10");
+        test_number(1.234E+10, "1.234E+10");
+        test_number(1.234E-10, "1.234E-10");
+        test_number(0.0, "1e-10000");
+
+        test_error_number(DecodingError::InvalidValue, "+0");
+        test_error_number(DecodingError::InvalidValue, "+1");
+        test_error_number(DecodingError::InvalidValue, ".123");
+        test_error_number(DecodingError::InvalidValue, "1.");
+        test_error_number(DecodingError::InvalidValue, "INF");
+        test_error_number(DecodingError::InvalidValue, "inf");
+        test_error_number(DecodingError::InvalidValue, "NAN");
+        test_error_number(DecodingError::InvalidValue, "nan");
     }
 }
