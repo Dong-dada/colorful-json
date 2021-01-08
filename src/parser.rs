@@ -1,6 +1,6 @@
-use std::str::Chars;
-use std::iter::{Peekable, FromIterator};
+use std::iter::{FromIterator, Peekable};
 use std::option::Option::Some;
+use std::str::Chars;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum ValueType {
@@ -64,7 +64,7 @@ impl Parser<'_> {
 
     fn skip_white_space(&mut self) {
         while let Some(c) = self.chars.peek() {
-            if *c == '\r' || *c == '\t' || *c == '\n' || *c == ' '  {
+            if *c == '\r' || *c == '\t' || *c == '\n' || *c == ' ' {
                 self.chars.next();
             } else {
                 break;
@@ -73,14 +73,10 @@ impl Parser<'_> {
     }
 
     fn parse_null(&mut self) -> Result<Value, DecodingError> {
-        if self.chars.next() == Some('n')
-            && self.chars.next() == Some('u')
-            && self.chars.next() == Some('l')
-            && self.chars.next() == Some('l')
-        {
+        if self.next_if_match_str("null") {
             return Ok(Value {
                 value_type: ValueType::NULL,
-                number: 0.0
+                number: 0.0,
             });
         }
 
@@ -88,14 +84,10 @@ impl Parser<'_> {
     }
 
     fn parse_true(&mut self) -> Result<Value, DecodingError> {
-        if self.chars.next() == Some('t')
-            && self.chars.next() == Some('r')
-            && self.chars.next() == Some('u')
-            && self.chars.next() == Some('e')
-        {
+        if self.next_if_match_str("true") {
             return Ok(Value {
                 value_type: ValueType::TRUE,
-                number: 0.0
+                number: 0.0,
             });
         }
 
@@ -103,15 +95,10 @@ impl Parser<'_> {
     }
 
     fn parse_false(&mut self) -> Result<Value, DecodingError> {
-        if self.chars.next() == Some('f')
-            && self.chars.next() == Some('a')
-            && self.chars.next() == Some('l')
-            && self.chars.next() == Some('s')
-            && self.chars.next() == Some('e')
-        {
+        if self.next_if_match_str("false") {
             return Ok(Value {
                 value_type: ValueType::FALSE,
-                number: 0.0
+                number: 0.0,
             });
         }
 
@@ -126,17 +113,17 @@ impl Parser<'_> {
         let mut number_chars = vec![];
 
         // 解析 "-"
-        if let Some(ch) = Parser::next_if(&mut self.chars, |ch| ch == '-') {
-            number_chars.push(ch);
+        if self.next_if_match('-') {
+            number_chars.push('-');
         }
 
         // 解析整数部分
         // int = "0" / digit1-9 *digit
-        if let Some(ch) = Parser::next_if(&mut self.chars, |ch| ch == '0') {
+        if self.next_if_match('0') {
+            number_chars.push('0');
+        } else if let Some(ch) = self.next_if_digit() {
             number_chars.push(ch);
-        } else if let Some(ch) = Parser::next_if(&mut self.chars, |ch| ch >= '1' && ch <= '9') {
-            number_chars.push(ch);
-            while let Some(ch) = Parser::next_if(&mut self.chars, |ch| ch >= '0' && ch <= '9') {
+            while let Some(ch) = self.next_if_digit() {
                 number_chars.push(ch);
             }
         } else {
@@ -146,61 +133,94 @@ impl Parser<'_> {
 
         // 解析小数部分
         // fraction = "." 1*digit
-        if let Some(ch) = Parser::next_if(&mut self.chars, |ch| ch == '.') {
-            number_chars.push(ch);
+        if self.next_if_match('.') {
+            number_chars.push('.');
 
-            // 小数点后面至少要有一个数字
-            if let Some(ch) = Parser::next_if(&mut self.chars, |ch| ch >= '0' && ch <= '9') {
+            // 解析小数点后的数字
+            let mut has_number = false;
+            while let Some(ch) = self.next_if_digit() {
                 number_chars.push(ch);
-            } else {
-                return Err(DecodingError::InvalidValue);
+                has_number = true;
             }
 
-            // 解析小数点后的其它数字
-            while let Some(ch) = Parser::next_if(&mut self.chars, |ch| ch >= '0' && ch <= '9') {
-                number_chars.push(ch);
+            // 小数点后面至少要有一个数字
+            if !has_number {
+                return Err(DecodingError::InvalidValue);
             }
         }
 
         // 解析指数部分
         // exp = ("e" / "E") ["-" / "+"] 1*digit
-        if let Some(ch) = Parser::next_if(&mut self.chars, |ch| ch == 'e' || ch == 'E') {
-            number_chars.push(ch);
+        if self.next_if_match_ignore_case('e') {
+            number_chars.push('e');
 
-            if let Some(ch) = Parser::next_if(&mut self.chars, |ch| ch == '-' || ch == '+') {
-                number_chars.push(ch);
+            if self.next_if_match('-') {
+                number_chars.push('-');
+            } else if self.next_if_match('+') {
+                number_chars.push('+');
             }
 
-            // 必须至少有一个数字
-            if let Some(ch) = Parser::next_if(&mut self.chars, |ch| ch >= '0' && ch <= '9') {
+            // 解析指数的数字部分
+            let mut has_number = false;
+            while let Some(ch) = self.next_if_digit() {
                 number_chars.push(ch);
-            } else {
+                has_number = true;
+            }
+
+            // 指数后面必须有个数字
+            if !has_number {
                 return Err(DecodingError::InvalidValue);
-            }
-
-            // 解析剩余数字
-            while let Some(ch) = Parser::next_if(&mut self.chars, |ch| ch >= '0' && ch <= '9') {
-                number_chars.push(ch);
             }
         }
 
         // 将字符串形式的数字，转换为 double 来存储
-        let number = String::from_iter(number_chars).parse::<f64>();
-        return if number.is_err() {
-            Err(DecodingError::InvalidValue)
-        } else {
-            Ok(Value {
+        if let Ok(number) = String::from_iter(number_chars).parse::<f64>() {
+            return Ok(Value {
                 value_type: ValueType::NUMBER,
-                number: number.unwrap()
-            })
+                number,
+            });
         }
+
+        return Err(DecodingError::InvalidValue);
     }
 
-    fn next_if(chars: &mut Peekable<Chars>,  func: impl FnOnce(char) -> bool) -> Option<char> {
-        if let Some(&ch) = chars.peek() {
-            if func(ch) {
-                chars.next();
-                return Some(ch);
+    fn next_if_match(&mut self, expect_char: char) -> bool {
+        if let Some(char) = self.chars.peek() {
+            if *char == expect_char {
+                self.chars.next();
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    fn next_if_match_ignore_case(&mut self, expect_char: char) -> bool {
+        if let Some(char) = self.chars.peek() {
+            if char.eq_ignore_ascii_case(&expect_char) {
+                self.chars.next();
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    fn next_if_match_str(&mut self, chars: &str) -> bool {
+        for char in chars.chars() {
+            if !self.next_if_match(char) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    fn next_if_digit(&mut self) -> Option<char> {
+        if let Some(&char) = self.chars.peek() {
+            if char >= '0' && char <= '9' {
+                self.chars.next();
+                return Some(char);
             }
         }
 
@@ -216,7 +236,7 @@ mod tests {
     fn get_value_type() {
         let value = Value {
             value_type: ValueType::NULL,
-            number: 0.0
+            number: 0.0,
         };
 
         assert_eq!(value.get_type(), ValueType::NULL);
@@ -313,6 +333,21 @@ mod tests {
         test_number(1.234E+10, "1.234E+10");
         test_number(1.234E-10, "1.234E-10");
         test_number(0.0, "1e-10000");
+
+        /* the smallest number > 1 */
+        test_number(1.0000000000000002, "1.0000000000000002");
+        /* minimum denormal */
+        test_number( 4.9406564584124654e-324, "4.9406564584124654e-324");
+        test_number(-4.9406564584124654e-324, "-4.9406564584124654e-324");
+        /* Max subnormal double */
+        test_number( 2.2250738585072009e-308, "2.2250738585072009e-308");
+        test_number(-2.2250738585072009e-308, "-2.2250738585072009e-308");
+        /* Min normal positive double */
+        test_number( 2.2250738585072014e-308, "2.2250738585072014e-308");
+        test_number(-2.2250738585072014e-308, "-2.2250738585072014e-308");
+        /* Max double */
+        test_number( 1.7976931348623157e+308, "1.7976931348623157e+308");
+        test_number(-1.7976931348623157e+308, "-1.7976931348623157e+308");
 
         test_error_number(DecodingError::InvalidValue, "+0");
         test_error_number(DecodingError::InvalidValue, "+1");
