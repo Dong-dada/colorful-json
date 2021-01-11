@@ -1,7 +1,9 @@
+use std::collections::HashMap;
 use std::iter::{FromIterator, Peekable};
 use std::option::Option::Some;
 use std::str::Chars;
-use std::collections::HashMap;
+use std::convert::TryFrom;
+use std::char::from_u32;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
@@ -40,6 +42,7 @@ impl Parser<'_> {
             Some('n') => self.parse_null(),
             Some('t') => self.parse_true(),
             Some('f') => self.parse_false(),
+            Some('\"') => self.parse_string(),
             _ => self.parse_number(),
         };
 
@@ -161,6 +164,69 @@ impl Parser<'_> {
         return Err(DecodingError::InvalidValue);
     }
 
+    fn parse_string(&mut self) -> Result<Value, DecodingError> {
+        if !self.next_if_match('\"') {
+            return Err(DecodingError::InvalidValue);
+        }
+
+        let mut chars: Vec<char> = Vec::new();
+        while let Some(&char) = self.chars.peek() {
+            if char == '\"' {
+                break;
+            }
+
+            if self.next_if_match('\\') {
+                // 转义字符
+                match self.chars.peek() {
+                    Some('\"') => chars.push('\"'),
+                    Some('\\') => chars.push('\\'),
+                    Some('/') => chars.push('/'),
+                    Some('n') => chars.push('\n'),
+                    Some('r') => chars.push('\r'),
+                    Some('t') => chars.push('\t'),
+                    // rust 不支持 \b, \f 转义字符，因此这两个转义字符被忽略
+                    Some('b') => {},
+                    Some('f') => {},
+                    // Escaped Unicode
+                    Some('u') => {
+                        self.chars.next();
+                        let mut numbers = [char; 4];
+                        for i in 0..4 {
+                            if let Some(number) = self.next_if_hex_digit() {
+                                numbers[i] = number;
+                            } else {
+                                return Err(DecodingError::InvalidValue);
+                            }
+                        }
+                        let numbers: String = numbers.iter().collect();
+                        if let Ok(number) = u32::from_str_radix(numbers.as_str(), 16) {
+                            if let Some(char) = from_u32(number) {
+                                chars.push(char);
+                                continue;
+                            } else {
+                                return Err(DecodingError::InvalidValue);
+                            }
+                        } else {
+                            return Err(DecodingError::InvalidValue);
+                        }
+                    }
+                    _ => return Err(DecodingError::InvalidValue),
+                }
+            } else {
+                // 其它字符
+                chars.push(char);
+            }
+            self.chars.next();
+        }
+
+        // 必须以 '\"' 结尾
+        if !self.next_if_match('\"') {
+            return Err(DecodingError::InvalidValue);
+        }
+
+        return Ok(Value::STRING(chars.into_iter().collect()));
+    }
+
     fn next_if_match(&mut self, expect_char: char) -> bool {
         if let Some(char) = self.chars.peek() {
             if *char == expect_char {
@@ -202,6 +268,28 @@ impl Parser<'_> {
         }
 
         return None;
+    }
+
+    fn next_if_hex_digit(&mut self) -> Option<char> {
+        if let Some(&char) = self.chars.peek() {
+            if (char >= '0' && char <= '9')
+                || (char >= 'a' && char <= 'f')
+                || (char >= 'A' && char <= 'F')
+            {
+                self.chars.next();
+                return Some(char);
+            }
+        }
+
+        return None;
+    }
+
+    fn from_u32(i: u32) -> Option<char> {
+        return if let Ok(char) = char::try_from(i) {
+            Some(char)
+        } else {
+            None
+        }
     }
 }
 
@@ -269,14 +357,14 @@ mod tests {
         let mut decoder = Parser::new(text);
         let actual_result = decoder.parse();
         assert!(actual_result.is_ok());
-        assert_eq!(actual_result.unwrap(), Value::NUMBER(ok_value));
+        assert_eq!(Value::NUMBER(ok_value), actual_result.unwrap());
     }
 
     fn test_error_number(error: DecodingError, text: &str) {
         let mut decoder = Parser::new(text);
         let actual_result = decoder.parse();
         assert!(actual_result.is_err());
-        assert_eq!(actual_result.unwrap_err(), error);
+        assert_eq!(error, actual_result.unwrap_err());
     }
 
     #[test]
@@ -304,16 +392,16 @@ mod tests {
         /* the smallest number > 1 */
         test_number(1.0000000000000002, "1.0000000000000002");
         /* minimum denormal */
-        test_number( 4.9406564584124654e-324, "4.9406564584124654e-324");
+        test_number(4.9406564584124654e-324, "4.9406564584124654e-324");
         test_number(-4.9406564584124654e-324, "-4.9406564584124654e-324");
         /* Max subnormal double */
-        test_number( 2.2250738585072009e-308, "2.2250738585072009e-308");
+        test_number(2.2250738585072009e-308, "2.2250738585072009e-308");
         test_number(-2.2250738585072009e-308, "-2.2250738585072009e-308");
         /* Min normal positive double */
-        test_number( 2.2250738585072014e-308, "2.2250738585072014e-308");
+        test_number(2.2250738585072014e-308, "2.2250738585072014e-308");
         test_number(-2.2250738585072014e-308, "-2.2250738585072014e-308");
         /* Max double */
-        test_number( 1.7976931348623157e+308, "1.7976931348623157e+308");
+        test_number(1.7976931348623157e+308, "1.7976931348623157e+308");
         test_number(-1.7976931348623157e+308, "-1.7976931348623157e+308");
 
         test_error_number(DecodingError::InvalidValue, "+0");
@@ -324,5 +412,32 @@ mod tests {
         test_error_number(DecodingError::InvalidValue, "inf");
         test_error_number(DecodingError::InvalidValue, "NAN");
         test_error_number(DecodingError::InvalidValue, "nan");
+    }
+
+    fn test_string(ok_value: &str, text: &str) {
+        let mut decoder = Parser::new(text);
+        let decoded_value = decoder.parse();
+        assert!(decoded_value.is_ok());
+        assert_eq!(Value::STRING(ok_value.to_string()), decoded_value.unwrap());
+    }
+
+    #[test]
+    fn parse_string() {
+        test_string("hello world", r#"  "hello world"  "#);
+
+        // 转义字符
+        test_string("hello\n world", r#"  "hello\n world"  "#);
+        test_string("hello\t world", r#"  "hello\t world"  "#);
+        test_string("hello\r world", r#"  "hello\r world"  "#);
+        test_string("hello\\ world", r#"  "hello\\ world"  "#);
+        test_string("hello\" world", r#"  "hello\" world"  "#);
+        test_string("hello/ world", r#"  "hello\/ world"  "#);
+
+        // 不支持的转移字符
+        test_string("hello world", r#"  "hello\b world"  "#);
+        test_string("hello world", r#"  "hello\f world"  "#);
+
+        // escaped unicode
+        test_string("❤", r#"  "\u2764"  "#);
     }
 }
