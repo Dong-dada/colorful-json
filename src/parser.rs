@@ -1,28 +1,17 @@
 use std::iter::{FromIterator, Peekable};
 use std::option::Option::Some;
 use std::str::Chars;
+use std::collections::HashMap;
 
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub enum ValueType {
+#[derive(Clone, Debug, PartialEq)]
+pub enum Value {
     NULL,
     FALSE,
     TRUE,
-    NUMBER,
-    STRING,
-    ARRAY,
-    OBJECT,
-}
-
-#[derive(Debug, PartialEq)]
-pub struct Value {
-    value_type: ValueType,
-    number: f64,
-}
-
-impl Value {
-    pub fn get_type(&self) -> ValueType {
-        return self.value_type;
-    }
+    NUMBER(f64),
+    STRING(String),
+    ARRAY(Vec<Value>),
+    OBJECT(HashMap<String, Value>),
 }
 
 #[derive(Debug, PartialEq)]
@@ -74,10 +63,7 @@ impl Parser<'_> {
 
     fn parse_null(&mut self) -> Result<Value, DecodingError> {
         if self.next_if_match_str("null") {
-            return Ok(Value {
-                value_type: ValueType::NULL,
-                number: 0.0,
-            });
+            return Ok(Value::NULL);
         }
 
         return Err(DecodingError::InvalidValue);
@@ -85,10 +71,7 @@ impl Parser<'_> {
 
     fn parse_true(&mut self) -> Result<Value, DecodingError> {
         if self.next_if_match_str("true") {
-            return Ok(Value {
-                value_type: ValueType::TRUE,
-                number: 0.0,
-            });
+            return Ok(Value::TRUE);
         }
 
         return Err(DecodingError::InvalidValue);
@@ -96,10 +79,7 @@ impl Parser<'_> {
 
     fn parse_false(&mut self) -> Result<Value, DecodingError> {
         if self.next_if_match_str("false") {
-            return Ok(Value {
-                value_type: ValueType::FALSE,
-                number: 0.0,
-            });
+            return Ok(Value::FALSE);
         }
 
         return Err(DecodingError::InvalidValue);
@@ -175,10 +155,7 @@ impl Parser<'_> {
 
         // 将字符串形式的数字，转换为 double 来存储
         if let Ok(number) = String::from_iter(number_chars).parse::<f64>() {
-            return Ok(Value {
-                value_type: ValueType::NUMBER,
-                number,
-            });
+            return Ok(Value::NUMBER(number));
         }
 
         return Err(DecodingError::InvalidValue);
@@ -233,16 +210,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn get_value_type() {
-        let value = Value {
-            value_type: ValueType::NULL,
-            number: 0.0,
-        };
-
-        assert_eq!(value.get_type(), ValueType::NULL);
-    }
-
-    #[test]
     fn parse() {
         let mut decoder = Parser::new("");
         let decoded_value = decoder.parse();
@@ -255,7 +222,7 @@ mod tests {
         let mut decoder = Parser::new("null");
         let decoded_value = decoder.parse();
         assert!(decoded_value.is_ok());
-        assert_eq!(decoded_value.unwrap().value_type, ValueType::NULL);
+        assert_eq!(decoded_value.unwrap(), Value::NULL);
     }
 
     #[test]
@@ -263,7 +230,7 @@ mod tests {
         let mut decoder = Parser::new("\r\n\t null");
         let decoded_value = decoder.parse();
         assert!(decoded_value.is_ok());
-        assert_eq!(decoded_value.unwrap().value_type, ValueType::NULL);
+        assert_eq!(decoded_value.unwrap(), Value::NULL);
     }
 
     #[test]
@@ -287,7 +254,7 @@ mod tests {
         let mut decoder = Parser::new(" true ");
         let decoded_value = decoder.parse();
         assert!(decoded_value.is_ok());
-        assert_eq!(decoded_value.unwrap().value_type, ValueType::TRUE);
+        assert_eq!(decoded_value.unwrap(), Value::TRUE);
     }
 
     #[test]
@@ -295,14 +262,14 @@ mod tests {
         let mut decoder = Parser::new(" false ");
         let decoded_value = decoder.parse();
         assert!(decoded_value.is_ok());
-        assert_eq!(decoded_value.unwrap().value_type, ValueType::FALSE);
+        assert_eq!(decoded_value.unwrap(), Value::FALSE);
     }
 
     fn test_number(ok_value: f64, text: &str) {
         let mut decoder = Parser::new(text);
         let actual_result = decoder.parse();
         assert!(actual_result.is_ok());
-        assert_eq!(actual_result.unwrap().number, ok_value);
+        assert_eq!(actual_result.unwrap(), Value::NUMBER(ok_value));
     }
 
     fn test_error_number(error: DecodingError, text: &str) {
