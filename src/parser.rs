@@ -1,9 +1,11 @@
+
 use std::collections::HashMap;
 use std::iter::{FromIterator, Peekable};
 use std::option::Option::Some;
 use std::str::Chars;
 use std::convert::TryFrom;
 use std::char::from_u32;
+use std::result::Result::Ok;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
@@ -53,6 +55,7 @@ impl Parser<'_> {
             Some('f') => self.parse_false(),
             Some('\"') => self.parse_string(),
             Some('[') => self.parse_array(),
+            Some('{') => self.parse_object(),
             _ => self.parse_number(),
         };
 
@@ -258,6 +261,46 @@ impl Parser<'_> {
         }
 
         return Ok(Value::ARRAY(array));
+    }
+
+    fn parse_object(&mut self) -> Result<Value, DecodingError> {
+        if !self.next_if_match('{') {
+            return Err(DecodingError::InvalidValue);
+        }
+
+        self.skip_white_space();
+
+        if self.next_if_match('}') {
+            return Ok(Value::OBJECT(HashMap::new()));
+        }
+
+        let mut object = HashMap::new();
+        loop {
+            self.skip_white_space();
+            if let Ok(Value::STRING(key)) = self.parse_string() {
+                self.skip_white_space();
+                if !self.next_if_match(':') {
+                    return Err(DecodingError::InvalidValue);
+                }
+
+                if let Ok(value) = self.parse_value() {
+                    object.insert(key, value);
+                    if self.next_if_match('}') {
+                        break;
+                    } else if self.next_if_match(',') {
+                        continue;
+                    } else {
+                        return Err(DecodingError::InvalidValue);
+                    }
+                } else {
+                    return Err(DecodingError::InvalidValue);
+                }
+            } else {
+                return Err(DecodingError::InvalidValue);
+            }
+        }
+
+        return Ok(Value::OBJECT(object));
     }
 
     fn next_if_match(&mut self, expect_char: char) -> bool {
@@ -496,5 +539,29 @@ mod tests {
                 Value::NULL,
             ]),
         ], r#"  ["hello", "world", 1.0, 2.0, ["colorful", "json", true, null]]  "#);
+    }
+
+    fn test_object(ok_value: HashMap<String, Value>, text: &str) {
+        let mut parser = Parser::new(text);
+        let result = parser.parse();
+        assert!(result.is_ok());
+        assert_eq!(Value::OBJECT(ok_value), result.unwrap());
+    }
+
+    #[test]
+    fn parse_object() {
+        test_object(HashMap::new(), r#" {} "#);
+        test_object(hashmap!{
+            "name".to_string() => Value::STRING("董哒哒".to_string()),
+            "age".to_string() => Value::NUMBER(42.0),
+            "color".to_string() => Value::ARRAY(vec![
+                Value::STRING("blue".to_string()),
+                Value::STRING("yellow".to_string()),
+            ]),
+            "project".to_string() => Value::OBJECT(hashmap! {
+                "name".to_string() => Value::STRING("colorful-json".to_string()),
+                "done".to_string() => Value::TRUE,
+            })
+        }, r#" {"name": "董哒哒", "age": 42, "color": ["blue", "yellow"], "project": {"name": "colorful-json", "done": true}} "#)
     }
 }
