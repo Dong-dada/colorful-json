@@ -1,4 +1,3 @@
-use std::char::from_u32;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::iter::{FromIterator, Peekable};
@@ -208,7 +207,7 @@ impl Parser<'_> {
                         }
                         let numbers: String = numbers.iter().collect();
                         if let Ok(number) = u32::from_str_radix(numbers.as_str(), 16) {
-                            if let Some(char) = from_u32(number) {
+                            if let Some(char) = Parser::from_u32(number) {
                                 chars.push(char);
                                 continue;
                             } else {
@@ -372,161 +371,124 @@ impl Parser<'_> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn parse() {
-        let mut parser = Parser::new("");
-        let result = parser.parse();
-        assert!(result.is_err());
-        assert_eq!(result.err().unwrap(), DecodingError::ExpectValue);
+    fn assert_result(expect_result: Result<Value, DecodingError>, text: &str) {
+        let mut parser = Parser::new(text);
+        let actual_result = parser.parse();
+        assert_eq!(expect_result, actual_result);
     }
 
     #[test]
-    fn parse_null() {
-        let mut parser = Parser::new("null");
-        let result = parser.parse();
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Value::NULL);
+    fn basic_tests() {
+        assert_result(Err(DecodingError::ExpectValue), "");
+
+        // null
+        assert_result(Ok(Value::NULL), "null");
+        assert_result(Ok(Value::NULL), "\r\n\t null");
+        assert_result(Err(DecodingError::InvalidValue), "nil");
+        assert_result(Err(DecodingError::InvalidValue), "n");
+
+        // true, false
+        assert_result(Ok(Value::TRUE), "true");
+        assert_result(Ok(Value::FALSE), "false");
+        assert_result(Err(DecodingError::RootNotSingular), "true_");
+        assert_result(Err(DecodingError::InvalidValue), "False_");
     }
 
-    #[test]
-    fn parse_null_with_whitespace() {
-        let mut parser = Parser::new("\r\n\t null");
-        let result = parser.parse();
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Value::NULL);
-    }
-
-    #[test]
-    fn parse_invalid_null() {
-        let mut parser = Parser::new("nuii");
-        let result = parser.parse();
-        assert!(result.is_err());
-        assert_eq!(result.err().unwrap(), DecodingError::InvalidValue);
-    }
-
-    #[test]
-    fn parse_uncompleted_null() {
-        let mut parser = Parser::new("n");
-        let result = parser.parse();
-        assert!(result.is_err());
-        assert_eq!(result.err().unwrap(), DecodingError::InvalidValue);
-    }
-
-    #[test]
-    fn parse_true() {
-        let mut parser = Parser::new(" true ");
-        let result = parser.parse();
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Value::TRUE);
-    }
-
-    #[test]
-    fn parse_false() {
-        let mut parser = Parser::new(" false ");
-        let result = parser.parse();
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Value::FALSE);
-    }
-
-    fn test_number(ok_value: f64, text: &str) {
+    fn assert_number(expect_number: f64, text: &str) {
         let mut parser = Parser::new(text);
         let actual_result = parser.parse();
         assert!(actual_result.is_ok());
-        assert_eq!(Value::NUMBER(ok_value), actual_result.unwrap());
-    }
-
-    fn test_error_number(error: DecodingError, text: &str) {
-        let mut parser = Parser::new(text);
-        let actual_result = parser.parse();
-        assert!(actual_result.is_err());
-        assert_eq!(error, actual_result.unwrap_err());
+        assert_eq!(Value::NUMBER(expect_number), actual_result.unwrap());
     }
 
     #[test]
-    fn parse_number() {
-        test_number(0.0, "0");
-        test_number(0.0, "-0");
-        test_number(0.0, "-0.0");
-        test_number(1.0, "1");
-        test_number(-1.0, "-1");
-        test_number(1.5, "1.5");
-        test_number(-1.5, "-1.5");
-        test_number(3.1416, "3.1416");
-        test_number(1E10, "1E10");
-        test_number(1e10, "1e10");
-        test_number(1E+10, "1E+10");
-        test_number(1E-10, "1E-10");
-        test_number(-1E10, "-1E10");
-        test_number(-1e10, "-1e10");
-        test_number(-1E+10, "-1E+10");
-        test_number(-1E-10, "-1E-10");
-        test_number(1.234E+10, "1.234E+10");
-        test_number(1.234E-10, "1.234E-10");
-        test_number(0.0, "1e-10000");
+    fn number_tests() {
+        assert_number(0.0, "0");
+        assert_number(0.0, "-0");
+        assert_number(0.0, "-0.0");
+        assert_number(1.0, "1");
+        assert_number(-1.0, "-1");
+        assert_number(1.5, "1.5");
+        assert_number(-1.5, "-1.5");
+        assert_number(3.1416, "3.1416");
+        assert_number(1E10, "1E10");
+        assert_number(1e10, "1e10");
+        assert_number(1E+10, "1E+10");
+        assert_number(1E-10, "1E-10");
+        assert_number(-1E10, "-1E10");
+        assert_number(-1e10, "-1e10");
+        assert_number(-1E+10, "-1E+10");
+        assert_number(-1E-10, "-1E-10");
+        assert_number(1.234E+10, "1.234E+10");
+        assert_number(1.234E-10, "1.234E-10");
+        assert_number(0.0, "1e-10000");
 
         /* the smallest number > 1 */
-        test_number(1.0000000000000002, "1.0000000000000002");
+        assert_number(1.0000000000000002, "1.0000000000000002");
         /* minimum denormal */
-        test_number(4.9406564584124654e-324, "4.9406564584124654e-324");
-        test_number(-4.9406564584124654e-324, "-4.9406564584124654e-324");
+        assert_number(4.9406564584124654e-324, "4.9406564584124654e-324");
+        assert_number(-4.9406564584124654e-324, "-4.9406564584124654e-324");
         /* Max subnormal double */
-        test_number(2.2250738585072009e-308, "2.2250738585072009e-308");
-        test_number(-2.2250738585072009e-308, "-2.2250738585072009e-308");
+        assert_number(2.2250738585072009e-308, "2.2250738585072009e-308");
+        assert_number(-2.2250738585072009e-308, "-2.2250738585072009e-308");
         /* Min normal positive double */
-        test_number(2.2250738585072014e-308, "2.2250738585072014e-308");
-        test_number(-2.2250738585072014e-308, "-2.2250738585072014e-308");
+        assert_number(2.2250738585072014e-308, "2.2250738585072014e-308");
+        assert_number(-2.2250738585072014e-308, "-2.2250738585072014e-308");
         /* Max double */
-        test_number(1.7976931348623157e+308, "1.7976931348623157e+308");
-        test_number(-1.7976931348623157e+308, "-1.7976931348623157e+308");
+        assert_number(1.7976931348623157e+308, "1.7976931348623157e+308");
+        assert_number(-1.7976931348623157e+308, "-1.7976931348623157e+308");
 
-        test_error_number(DecodingError::InvalidValue, "+0");
-        test_error_number(DecodingError::InvalidValue, "+1");
-        test_error_number(DecodingError::InvalidValue, ".123");
-        test_error_number(DecodingError::InvalidValue, "1.");
-        test_error_number(DecodingError::InvalidValue, "INF");
-        test_error_number(DecodingError::InvalidValue, "inf");
-        test_error_number(DecodingError::InvalidValue, "NAN");
-        test_error_number(DecodingError::InvalidValue, "nan");
+        assert_result(Err(DecodingError::InvalidValue), "+0");
+        assert_result(Err(DecodingError::InvalidValue), "+1");
+        assert_result(Err(DecodingError::InvalidValue), ".123");
+        assert_result(Err(DecodingError::InvalidValue), "1.");
+        assert_result(Err(DecodingError::InvalidValue), "INF");
+        assert_result(Err(DecodingError::InvalidValue), "inf");
+        assert_result(Err(DecodingError::InvalidValue), "NAN");
+        assert_result(Err(DecodingError::InvalidValue), "nan");
     }
 
-    fn test_string(ok_value: &str, text: &str) {
+    fn assert_string(expect_string: &str, text: &str) {
         let mut parser = Parser::new(text);
         let result = parser.parse();
-        assert!(result.is_ok());
-        assert_eq!(Value::STRING(ok_value.to_string()), result.unwrap());
+        assert_eq!(Ok(Value::STRING(expect_string.to_string())), result);
     }
 
     #[test]
-    fn parse_string() {
-        test_string("hello world", r#"  "hello world"  "#);
+    fn string_tests() {
+        assert_string("", r#"  ""  "#);
+        assert_string("hello world", r#"  "hello world"  "#);
 
         // 转义字符
-        test_string("hello\n world", r#"  "hello\n world"  "#);
-        test_string("hello\t world", r#"  "hello\t world"  "#);
-        test_string("hello\r world", r#"  "hello\r world"  "#);
-        test_string("hello\\ world", r#"  "hello\\ world"  "#);
-        test_string("hello\" world", r#"  "hello\" world"  "#);
-        test_string("hello/ world", r#"  "hello\/ world"  "#);
+        assert_string("hello\n world", r#"  "hello\n world"  "#);
+        assert_string("hello\t world", r#"  "hello\t world"  "#);
+        assert_string("hello\r world", r#"  "hello\r world"  "#);
+        assert_string("hello\\ world", r#"  "hello\\ world"  "#);
+        assert_string("hello\" world", r#"  "hello\" world"  "#);
+        assert_string("hello/ world", r#"  "hello\/ world"  "#);
 
         // 不支持的转移字符
-        test_string("hello world", r#"  "hello\b world"  "#);
-        test_string("hello world", r#"  "hello\f world"  "#);
+        assert_string("hello world", r#"  "hello\b world"  "#);
+        assert_string("hello world", r#"  "hello\f world"  "#);
 
         // escaped unicode
-        test_string("❤", r#"  "\u2764"  "#);
+        assert_string("❤", r#"  "\u2764"  "#);
+
+        assert_result(Err(DecodingError::InvalidValue), r#"  "hello  "#);
+        assert_result(Err(DecodingError::InvalidValue), r#"  hello"  "#);
+        assert_result(Err(DecodingError::RootNotSingular), r#"  "hello"hello"  "#);
     }
 
-    fn test_array(ok_value: Vec<Value>, text: &str) {
+    fn assert_array(ok_value: Vec<Value>, text: &str) {
         let mut parser = Parser::new(text);
         let result = parser.parse();
-        assert!(result.is_ok());
-        assert_eq!(Value::ARRAY(ok_value), result.unwrap());
+        assert_eq!(Ok(Value::ARRAY(ok_value)), result);
     }
 
     #[test]
-    fn parse_array() {
-        test_array(Vec::new(), r#" [] "#);
-        test_array(
+    fn array_tests() {
+        assert_array(Vec::new(), r#" [] "#);
+        assert_array(
             vec![
                 Value::STRING("hello".to_string()),
                 Value::STRING("world".to_string()),
@@ -541,19 +503,24 @@ mod tests {
             ],
             r#"  ["hello", "world", 1.0, 2.0, ["colorful", "json", true, null]]  "#,
         );
+        assert_array(vec![
+            Value::ARRAY(vec![]),
+            Value::ARRAY(vec![])
+        ], r#" [[],[]] "#);
+
+        assert_result(Err(DecodingError::InvalidValue), r#"  ["abc", ["123", [1.0]]  "#);
     }
 
-    fn test_object(ok_value: HashMap<String, Value>, text: &str) {
+    fn assert_object(expect_object: HashMap<String, Value>, text: &str) {
         let mut parser = Parser::new(text);
         let result = parser.parse();
-        assert!(result.is_ok());
-        assert_eq!(Value::OBJECT(ok_value), result.unwrap());
+        assert_eq!(Ok(Value::OBJECT(expect_object)), result);
     }
 
     #[test]
-    fn parse_object() {
-        test_object(HashMap::new(), r#" {} "#);
-        test_object(
+    fn object_tests() {
+        assert_object(HashMap::new(), r#" {} "#);
+        assert_object(
             hashmap! {
                 "name".to_string() => Value::STRING("董哒哒".to_string()),
                 "age".to_string() => Value::NUMBER(42.0),
@@ -579,5 +546,12 @@ mod tests {
             }
         } "#,
         );
+
+        assert_object(hashmap! {
+            "".to_string() => Value::OBJECT(hashmap! {})
+        }, r#" {"": {}} "#);
+
+        assert_result(Err(DecodingError::InvalidValue), r#" {"name": { "age": 19 } "#);
+        assert_result(Err(DecodingError::RootNotSingular), r#" "name": "董哒哒" "#);
     }
 }
