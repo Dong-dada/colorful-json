@@ -35,6 +35,15 @@ impl Parser<'_> {
     }
 
     pub fn parse(&mut self) -> Result<Value, DecodingError> {
+        let result = self.parse_value();
+        if result.is_ok() && self.chars.next() != None {
+            return Err(DecodingError::RootNotSingular);
+        }
+
+        return result;
+    }
+
+    fn parse_value(&mut self) -> Result<Value, DecodingError> {
         self.skip_white_space();
 
         let result = match self.chars.peek() {
@@ -43,14 +52,11 @@ impl Parser<'_> {
             Some('t') => self.parse_true(),
             Some('f') => self.parse_false(),
             Some('\"') => self.parse_string(),
+            Some('[') => self.parse_array(),
             _ => self.parse_number(),
         };
 
         self.skip_white_space();
-        if result.is_ok() && self.chars.next() != None {
-            return Err(DecodingError::RootNotSingular);
-        }
-
         return result;
     }
 
@@ -227,6 +233,29 @@ impl Parser<'_> {
         return Ok(Value::STRING(chars.into_iter().collect()));
     }
 
+    fn parse_array(&mut self) -> Result<Value, DecodingError> {
+        if !self.next_if_match('[') {
+            return Err(DecodingError::InvalidValue);
+        }
+
+        self.skip_white_space();
+
+        let mut array = Vec::new();
+        while let Ok(value) = self.parse_value() {
+            array.push(value);
+
+            if self.next_if_match(']') {
+                break;
+            } else if self.next_if_match(',') {
+                continue;
+            } else {
+                return Err(DecodingError::InvalidValue);
+            }
+        }
+
+        return Ok(Value::ARRAY(array));
+    }
+
     fn next_if_match(&mut self, expect_char: char) -> bool {
         if let Some(char) = self.chars.peek() {
             if *char == expect_char {
@@ -299,70 +328,70 @@ mod tests {
 
     #[test]
     fn parse() {
-        let mut decoder = Parser::new("");
-        let decoded_value = decoder.parse();
-        assert!(decoded_value.is_err());
-        assert_eq!(decoded_value.err().unwrap(), DecodingError::ExpectValue);
+        let mut parser = Parser::new("");
+        let result = parser.parse();
+        assert!(result.is_err());
+        assert_eq!(result.err().unwrap(), DecodingError::ExpectValue);
     }
 
     #[test]
     fn parse_null() {
-        let mut decoder = Parser::new("null");
-        let decoded_value = decoder.parse();
-        assert!(decoded_value.is_ok());
-        assert_eq!(decoded_value.unwrap(), Value::NULL);
+        let mut parser = Parser::new("null");
+        let result = parser.parse();
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), Value::NULL);
     }
 
     #[test]
     fn parse_null_with_whitespace() {
-        let mut decoder = Parser::new("\r\n\t null");
-        let decoded_value = decoder.parse();
-        assert!(decoded_value.is_ok());
-        assert_eq!(decoded_value.unwrap(), Value::NULL);
+        let mut parser = Parser::new("\r\n\t null");
+        let result = parser.parse();
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), Value::NULL);
     }
 
     #[test]
     fn parse_invalid_null() {
-        let mut decoder = Parser::new("nuii");
-        let decoded_value = decoder.parse();
-        assert!(decoded_value.is_err());
-        assert_eq!(decoded_value.err().unwrap(), DecodingError::InvalidValue);
+        let mut parser = Parser::new("nuii");
+        let result = parser.parse();
+        assert!(result.is_err());
+        assert_eq!(result.err().unwrap(), DecodingError::InvalidValue);
     }
 
     #[test]
     fn parse_uncompleted_null() {
-        let mut decoder = Parser::new("n");
-        let decoded_value = decoder.parse();
-        assert!(decoded_value.is_err());
-        assert_eq!(decoded_value.err().unwrap(), DecodingError::InvalidValue);
+        let mut parser = Parser::new("n");
+        let result = parser.parse();
+        assert!(result.is_err());
+        assert_eq!(result.err().unwrap(), DecodingError::InvalidValue);
     }
 
     #[test]
     fn parse_true() {
-        let mut decoder = Parser::new(" true ");
-        let decoded_value = decoder.parse();
-        assert!(decoded_value.is_ok());
-        assert_eq!(decoded_value.unwrap(), Value::TRUE);
+        let mut parser = Parser::new(" true ");
+        let result = parser.parse();
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), Value::TRUE);
     }
 
     #[test]
     fn parse_false() {
-        let mut decoder = Parser::new(" false ");
-        let decoded_value = decoder.parse();
-        assert!(decoded_value.is_ok());
-        assert_eq!(decoded_value.unwrap(), Value::FALSE);
+        let mut parser = Parser::new(" false ");
+        let result = parser.parse();
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), Value::FALSE);
     }
 
     fn test_number(ok_value: f64, text: &str) {
-        let mut decoder = Parser::new(text);
-        let actual_result = decoder.parse();
+        let mut parser = Parser::new(text);
+        let actual_result = parser.parse();
         assert!(actual_result.is_ok());
         assert_eq!(Value::NUMBER(ok_value), actual_result.unwrap());
     }
 
     fn test_error_number(error: DecodingError, text: &str) {
-        let mut decoder = Parser::new(text);
-        let actual_result = decoder.parse();
+        let mut parser = Parser::new(text);
+        let actual_result = parser.parse();
         assert!(actual_result.is_err());
         assert_eq!(error, actual_result.unwrap_err());
     }
@@ -415,10 +444,10 @@ mod tests {
     }
 
     fn test_string(ok_value: &str, text: &str) {
-        let mut decoder = Parser::new(text);
-        let decoded_value = decoder.parse();
-        assert!(decoded_value.is_ok());
-        assert_eq!(Value::STRING(ok_value.to_string()), decoded_value.unwrap());
+        let mut parser = Parser::new(text);
+        let result = parser.parse();
+        assert!(result.is_ok());
+        assert_eq!(Value::STRING(ok_value.to_string()), result.unwrap());
     }
 
     #[test]
@@ -439,5 +468,25 @@ mod tests {
 
         // escaped unicode
         test_string("❤", r#"  "\u2764"  "#);
+    }
+
+    #[test]
+    fn parse_array() {
+        let mut parser = Parser::new(r#"  ["hello", "world", 1.0, 2.0, ["colorful", "json", true, null]]  "#);
+        let result = parser.parse();
+        assert!(result.is_ok());
+        let expected_value = Value::ARRAY(vec![
+            Value::STRING("hello".to_string()),
+            Value::STRING("world".to_string()),
+            Value::NUMBER(1.0),
+            Value::NUMBER(2.0),
+            Value::ARRAY(vec![
+                Value::STRING("colorful".to_string()),
+                Value::STRING("json".to_string()),
+                Value::TRUE,
+                Value::NULL,
+            ]),
+        ]);
+        assert_eq!(expected_value, result.unwrap());
     }
 }
