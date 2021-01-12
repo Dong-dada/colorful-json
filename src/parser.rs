@@ -1,11 +1,10 @@
-
+use std::char::from_u32;
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::iter::{FromIterator, Peekable};
 use std::option::Option::Some;
-use std::str::Chars;
-use std::convert::TryFrom;
-use std::char::from_u32;
 use std::result::Result::Ok;
+use std::str::Chars;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
@@ -194,8 +193,8 @@ impl Parser<'_> {
                     Some('r') => chars.push('\r'),
                     Some('t') => chars.push('\t'),
                     // rust 不支持 \b, \f 转义字符，因此这两个转义字符被忽略
-                    Some('b') => {},
-                    Some('f') => {},
+                    Some('b') => {}
+                    Some('f') => {}
                     // Escaped Unicode
                     Some('u') => {
                         self.chars.next();
@@ -365,7 +364,7 @@ impl Parser<'_> {
             Some(char)
         } else {
             None
-        }
+        };
     }
 }
 
@@ -527,18 +526,21 @@ mod tests {
     #[test]
     fn parse_array() {
         test_array(Vec::new(), r#" [] "#);
-        test_array(vec![
-            Value::STRING("hello".to_string()),
-            Value::STRING("world".to_string()),
-            Value::NUMBER(1.0),
-            Value::NUMBER(2.0),
-            Value::ARRAY(vec![
-                Value::STRING("colorful".to_string()),
-                Value::STRING("json".to_string()),
-                Value::TRUE,
-                Value::NULL,
-            ]),
-        ], r#"  ["hello", "world", 1.0, 2.0, ["colorful", "json", true, null]]  "#);
+        test_array(
+            vec![
+                Value::STRING("hello".to_string()),
+                Value::STRING("world".to_string()),
+                Value::NUMBER(1.0),
+                Value::NUMBER(2.0),
+                Value::ARRAY(vec![
+                    Value::STRING("colorful".to_string()),
+                    Value::STRING("json".to_string()),
+                    Value::TRUE,
+                    Value::NULL,
+                ]),
+            ],
+            r#"  ["hello", "world", 1.0, 2.0, ["colorful", "json", true, null]]  "#,
+        );
     }
 
     fn test_object(ok_value: HashMap<String, Value>, text: &str) {
@@ -551,17 +553,31 @@ mod tests {
     #[test]
     fn parse_object() {
         test_object(HashMap::new(), r#" {} "#);
-        test_object(hashmap!{
-            "name".to_string() => Value::STRING("董哒哒".to_string()),
-            "age".to_string() => Value::NUMBER(42.0),
-            "color".to_string() => Value::ARRAY(vec![
-                Value::STRING("blue".to_string()),
-                Value::STRING("yellow".to_string()),
-            ]),
-            "project".to_string() => Value::OBJECT(hashmap! {
-                "name".to_string() => Value::STRING("colorful-json".to_string()),
-                "done".to_string() => Value::TRUE,
-            })
-        }, r#" {"name": "董哒哒", "age": 42, "color": ["blue", "yellow"], "project": {"name": "colorful-json", "done": true}} "#)
+        test_object(
+            hashmap! {
+                "name".to_string() => Value::STRING("董哒哒".to_string()),
+                "age".to_string() => Value::NUMBER(42.0),
+                "color".to_string() => Value::ARRAY(vec![
+                    Value::STRING("blue".to_string()),
+                    Value::STRING("yellow".to_string()),
+                ]),
+                "project".to_string() => Value::OBJECT(hashmap! {
+                    "name".to_string() => Value::STRING("colorful-json".to_string()),
+                    "done".to_string() => Value::TRUE,
+                })
+            },
+            r#" {
+            "name": "董哒哒",
+            "age": 42,
+            "color": [
+                "blue",
+                "yellow"
+            ],
+            "project": {
+                "name": "colorful-json",
+                "done": true
+            }
+        } "#,
+        );
     }
 }
