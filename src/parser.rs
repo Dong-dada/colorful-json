@@ -240,6 +240,10 @@ impl Parser<'_> {
 
         self.skip_white_space();
 
+        if self.next_if_match(']') {
+            return Ok(Value::ARRAY(Vec::new()));
+        }
+
         let mut array = Vec::new();
         while let Ok(value) = self.parse_value() {
             array.push(value);
@@ -470,12 +474,17 @@ mod tests {
         test_string("❤", r#"  "\u2764"  "#);
     }
 
-    #[test]
-    fn parse_array() {
-        let mut parser = Parser::new(r#"  ["hello", "world", 1.0, 2.0, ["colorful", "json", true, null]]  "#);
+    fn test_array(ok_value: Vec<Value>, text: &str) {
+        let mut parser = Parser::new(text);
         let result = parser.parse();
         assert!(result.is_ok());
-        let expected_value = Value::ARRAY(vec![
+        assert_eq!(Value::ARRAY(ok_value), result.unwrap());
+    }
+
+    #[test]
+    fn parse_array() {
+        test_array(Vec::new(), r#" [] "#);
+        test_array(vec![
             Value::STRING("hello".to_string()),
             Value::STRING("world".to_string()),
             Value::NUMBER(1.0),
@@ -486,7 +495,6 @@ mod tests {
                 Value::TRUE,
                 Value::NULL,
             ]),
-        ]);
-        assert_eq!(expected_value, result.unwrap());
+        ], r#"  ["hello", "world", 1.0, 2.0, ["colorful", "json", true, null]]  "#);
     }
 }
